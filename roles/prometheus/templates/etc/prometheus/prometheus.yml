@@ -1,0 +1,38 @@
+## {{ ansible_managed }}
+
+global:
+  scrape_interval: 30s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 30s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: static_node_exporter
+    static_configs:
+      # Consul
+      - targets: ["hashi-consul-1.us-homelab1.hl.rmb938.me:9100"]
+      - targets: ["hashi-consul-2.us-homelab1.hl.rmb938.me:9100"]
+      - targets: ["hashi-consul-3.us-homelab1.hl.rmb938.me:9100"]
+      # Vault
+      - targets: ["hashi-vault-1.us-homelab1.hl.rmb938.me:9100"]
+      - targets: ["hashi-vault-2.us-homelab1.hl.rmb938.me:9100"]
+      - targets: ["hashi-vault-3.us-homelab1.hl.rmb938.me:9100"]
+
+  - job_name: consul
+    consul_sd_configs:
+      - server: localhost:8500
+        datacenter: hl-us-homelab1
+        filter: 'ServiceMeta.prometheus_scrape == "true"'
+    relabel_configs:
+      - source_labels:
+          - __meta_consul_dc
+        target_label: consul_dc
+      - source_labels:
+          - __meta_consul_service
+        target_label: consul_service
+      - source_labels:
+          - __meta_consul_node
+        target_label: consul_node
