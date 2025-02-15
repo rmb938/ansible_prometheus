@@ -71,7 +71,7 @@
       /opt/vault/tls/vault.key
       --ca-url https://step-ca.us-homelab1.hl.rmb938.me
       --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
-      --force --expires-in 720h --exec --exec "systemctl try-reload-or-restart vault"
+      --force --expires-in 720h --exec "systemctl try-reload-or-restart vault"
     state: present
 
 - name: Configure Vault Agent
@@ -327,6 +327,48 @@
   with_fileglob:
     - ../templates/etc/prometheus/scrape_configs/*.yml
   register: prometheus_scrape_configs
+
+- name: Create Prometheus TLS Dir
+  ansible.builtin.file:
+    path: /etc/prometheus/tls/
+    state: directory
+    owner: prometheus
+    group: prometheus
+    mode: "0775"
+
+- name: Create Promethues Certificates
+  ansible.builtin.command: >-
+    step ca certificate {{ ansible_fqdn }}
+    /etc/prometheus/tls/prometheus.crt
+    /etc/prometheus/tls/prometheus.key
+    --ca-url https://step-ca.us-homelab1.hl.rmb938.me:8443
+    --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+  args:
+    creates: "/etc/prometheus/tls/prometheus.crt"
+
+- name: Own Promethues certificates
+  ansible.builtin.file:
+    path: /etc/prometheus/tls/{{ item }}
+    owner: prometheus
+    group: prometheus
+    mode: "0600"
+  with_items:
+    - prometheus.crt
+    - prometheus.key
+
+- name: Cron to renew prometheus certificates
+  ansible.builtin.cron:
+    name: "renew prometheus certificates"
+    special_time: "hourly"
+    # Rekey needs to happen against the CA, RA's don't support rekey
+    # https://smallstep.com/docs/step-ca/registration-authority-ra-mode/#stepcas-limitations
+    job: >-
+      step ca rekey etc/prometheus/tls/prometheus.crt
+      /etc/prometheus/tls/prometheus.key
+      --ca-url https://step-ca.us-homelab1.hl.rmb938.me
+      --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+      --force --expires-in 720h --exec "systemctl try-reload-or-restart prometheus"
+    state: present
 
 - name: Start and Enable Prometheus
   ansible.builtin.systemd:
