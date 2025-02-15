@@ -230,6 +230,7 @@
 #     name: prometheus
 #     state: present
 
+# Start Prometheus
 - name: Download Prometheus archive
   ansible.builtin.get_url:
     url: "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-amd64.tar.gz"
@@ -389,6 +390,7 @@
   when: prometheus_web_config.changed or
     prometheus_config.changed or
     prometheus_scrape_configs.changed
+# End Prometheus
 
 # Start Consul Template for Prometheus
 - name: Add prometheus to sudoers
@@ -464,3 +466,145 @@
     state: reloaded
   when: consul_template_prometheus_templates.changed or consul_template_prometheus_config.changed or consul_template_prometheus_templates_files.changed
 # End Consul Template for prometheus
+
+# Start Grafana PDC Agent
+- name: Download Grafana PDC archive
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/pdc-agent/releases/download/v0.0.40/pdc-agent_Linux_x86_64.tar.gz"
+    dest: /var/lib/grafana-pdc.tar.gz
+    checksum: "sha256:0d9fa9d52945671f252962e1955cdacf5474b96be3c2e2de4a345176d042ba2f"
+    mode: "0666"
+
+- name: Extract Grafana PDC archive
+  ansible.builtin.unarchive:
+    src: /var/lib/grafana-pdc.tar.gz
+    dest: /var/lib
+    remote_src: true
+
+- name: Copy Grafana PDC binary
+  ansible.builtin.copy:
+    src: /var/lib/pdc-agent_Linux_x86_64/pdc
+    dest: /usr/local/bin/grafana-pdc
+    mode: "0755"
+    remote_src: true
+
+- name: Create grafana-pdc group
+  ansible.builtin.group:
+    name: grafana-pdc
+    state: present
+    system: true
+
+- name: Create grafana-pdc user
+  ansible.builtin.user:
+    name: grafana-pdc
+    group: grafana-pdc
+    home: /etc/grafana-pdc
+    create_home: false
+    state: present
+    system: true
+
+- name: Create grafana-pdc home dir
+  ansible.builtin.file:
+    path: /etc/grafana-pdc
+    state: directory
+    owner: grafana-pdc
+    group: grafana-pdc
+    mode: "0775"
+
+- name: Create grafana-pdc ssh dir
+  ansible.builtin.file:
+    path: /etc/grafana-pdc/.ssh
+    state: directory
+    owner: grafana-pdc
+    group: grafana-pdc
+    mode: "0775"
+
+- name: Grafana PDC SystemD
+  ansible.builtin.template:
+    src: etc/systemd/system/grafana-pdc.service
+    dest: /etc/systemd/system/grafana-pdc.service
+    mode: "0644"
+  register: grafana_pdc_systemd
+
+- name: Grafana PDC systemd # noqa: no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: grafana_pdc_systemd.changed
+# End Grafana PDC Agent
+
+# Start Consul Template for grafana-pdc
+- name: Add grafana-pdc to sudoers
+  community.general.sudoers:
+    name: grafana-pdc
+    user: grafana-pdc
+    nopassword: true
+    validation: required
+    commands:
+      - /usr/bin/systemctl reload-or-restart grafana-pdc
+    state: present
+
+- name: Configure Consul Template for grafana-pdc
+  ansible.builtin.template:
+    src: etc/consul-template/consul-template-grafana-pdc.hcl
+    dest: /etc/consul-template/consul-template-grafana-pdc.hcl
+    mode: "0644"
+    owner: grafana-pdc
+    group: grafana-pdc
+  register: consul_template_grafana_pdc_config
+
+- name: Create Consul Template for grafana-pdc Templates directory
+  ansible.builtin.file:
+    path: /etc/consul-template/templates/grafana-pdc/
+    state: directory
+    mode: "0744"
+    owner: grafana-pdc
+    group: grafana-pdc
+
+- name: Place Consul Template for grafana-pdc Templates Files
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/grafana-pdc/{{ item | basename }}"
+    mode: "0644"
+    owner: haproxy
+    group: haproxy
+  with_fileglob:
+    - ../files/etc/consul-template/templates/grafana-pdc/*.ctmpl
+  register: consul_template_grafana_pdc_templates_files
+
+- name: Place Consul Template for grafana-pdc Templates Templates
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/grafana-pdc/{{ item | basename }}"
+    mode: "0644"
+    owner: grafana-pdc
+    group: grafana-pdc
+  with_fileglob:
+    - ../templates/etc/consul-template/templates/grafana-pdc/*.ctmpl
+  register: consul_template_grafana_pdc_templates
+
+- name: Consul Template for grafana-pdc SystemD
+  ansible.builtin.template:
+    src: etc/systemd/system/consul-template-grafana-pdc.service
+    dest: /etc/systemd/system/consul-template-grafana-pdc.service
+    mode: "0644"
+  register: consul_template_grafana_pdc_systemd
+
+- name: Consul Template for grafana-pdc systemd # noqa: no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: consul_template_grafana_pdc_systemd.changed
+
+- name: Start and enable Consul Template for grafana-pdc
+  ansible.builtin.systemd:
+    name: consul-template-grafana-pdc
+    state: started
+    enabled: true
+
+- name: Restart Consul Template for grafana-pdc if config changed # noqa: no-handler
+  ansible.builtin.systemd:
+    name: consul-template-grafana-pdc
+    state: reloaded
+  when: consul_template_grafana_pdc_templates.changed or
+    consul_template_grafana_pdc_config.changed or
+    consul_template_grafana_pdc_templates_files.changed
+# End Consul Template for grafana-pdc
