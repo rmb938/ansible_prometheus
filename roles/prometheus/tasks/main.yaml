@@ -295,7 +295,7 @@
   ansible.builtin.template:
     src: etc/prometheus/prometheus.yml
     dest: /etc/prometheus/prometheus.yml
-    mode: "0644"
+    mode: "0600"
     owner: prometheus
     group: prometheus
   register: prometheus_config
@@ -304,10 +304,29 @@
   ansible.builtin.template:
     src: etc/prometheus/web_config.yml
     dest: /etc/prometheus/web_config.yml
-    mode: "0644"
+    mode: "0600"
     owner: prometheus
     group: prometheus
   register: prometheus_web_config
+
+- name: Create Prometheus Scrape Configs Dir
+  ansible.builtin.file:
+    path: /etc/prometheus/scrape_configs/
+    state: directory
+    owner: prometheus
+    group: prometheus
+    mode: "0775"
+
+- name: Prometheus Scrape Configs
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/prometheus/scrape_configs/{{ item | basename }}"
+    mode: "0600"
+    owner: prometheus
+    group: prometheus
+  with_fileglob:
+    - ../templates/etc/prometheus/scrape_configs/*.yml
+  register: prometheus_scrape_configs
 
 - name: Start and Enable Prometheus
   ansible.builtin.systemd:
@@ -315,10 +334,91 @@
     state: started
     enabled: true
 
+- name: Restart prometheus if systemd changed # noqa: no-handler
+  ansible.builtin.systemd:
+    name: prometheus
+    state: reloaded
+  when: prometheus_systemd.changed
+
 - name: Restart prometheus if config changed # noqa: no-handler
   ansible.builtin.systemd:
     name: prometheus
-    state: restarted
-  when: prometheus_systemd.changed or
-    prometheus_web_config or
-    prometheus_config.changed
+    state: reloaded
+  when: prometheus_web_config.changed or
+    prometheus_config.changed or
+    prometheus_scrape_configs.changed
+
+# Start Consul Template for Prometheus
+- name: Add prometheus to sudoers
+  community.general.sudoers:
+    name: prometheus
+    user: prometheus
+    nopassword: true
+    validation: required
+    commands:
+      - /usr/bin/systemctl reload-or-restart prometheus
+    state: present
+
+- name: Configure Consul Template for prometheus
+  ansible.builtin.template:
+    src: etc/consul-template/consul-template-prometheus.hcl
+    dest: /etc/consul-template/consul-template-prometheus.hcl
+    mode: "0644"
+    owner: prometheus
+    group: prometheus
+  register: consul_template_prometheus_config
+
+- name: Create Consul Template for prometheus Templates directory
+  ansible.builtin.file:
+    path: /etc/consul-template/templates/prometheus/
+    state: directory
+    mode: "0744"
+    owner: prometheus
+    group: prometheus
+
+- name: Place Consul Template for prometheus Templates Files
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/prometheus/{{ item | basename }}"
+    mode: "0644"
+    owner: haproxy
+    group: haproxy
+  with_fileglob:
+    - ../files/etc/consul-template/templates/prometheus/*.ctmpl
+  register: consul_template_prometheus_templates_files
+
+- name: Place Consul Template for prometheus Templates Templates
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/prometheus/{{ item | basename }}"
+    mode: "0644"
+    owner: prometheus
+    group: prometheus
+  with_fileglob:
+    - ../templates/etc/consul-template/templates/prometheus/*.ctmpl
+  register: consul_template_prometheus_templates
+
+- name: Consul Template for prometheus SystemD
+  ansible.builtin.template:
+    src: etc/systemd/system/consul-template-prometheus.service
+    dest: /etc/systemd/system/consul-template-prometheus.service
+    mode: "0644"
+  register: consul_template_prometheus_systemd
+
+- name: Consul Template for prometheus systemd # noqa: no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: consul_template_prometheus_systemd.changed
+
+- name: Start and enable Consul Template for prometheus
+  ansible.builtin.systemd:
+    name: consul-template-prometheus
+    state: started
+    enabled: true
+
+- name: Restart Consul Template for prometheus if config changed # noqa: no-handler
+  ansible.builtin.systemd:
+    name: consul-template-prometheus
+    state: reloaded
+  when: consul_template_prometheus_templates.changed or consul_template_prometheus_config.changed or consul_template_prometheus_templates_files.changed
+# End Consul Template for prometheus

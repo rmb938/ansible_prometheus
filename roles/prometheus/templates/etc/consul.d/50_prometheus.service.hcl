@@ -7,7 +7,7 @@ services {
 
   check {
     id = "prometheus-http"
-    http = "http://127.0.0.1:9090/healthz"
+    http = "http://127.0.0.1:9090/-/healthy"
     interval = "10s"
   }
 }

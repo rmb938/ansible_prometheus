@@ -3,9 +3,10 @@
 vault {
   # Vault agent will connect to the Vault that is the same number as itself.
   # We are HAProxy so we are having each connect to a unique Vault. 
-  address = "https://hashi-vault.haproxy.us-homelab1.hl.rmb938.me"
+  address = "https://hashi-vault-standby.haproxy.us-homelab1.hl.rmb938.me"
   retry {
-    num_retries = 5
+    # Setting to a large number, vault agent doesn't have unlimited retries.
+    num_retries = 2147483647
   }
 }
 
